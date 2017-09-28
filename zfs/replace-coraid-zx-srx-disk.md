@@ -16,8 +16,8 @@
 ----
 ### 4. ON SRX: Find the correct MASK for use when recreating the JBOD:
 
-You may be able to copy the mask from another lun, using the `mask` command on the SRX:
-    SRX shelf X> mask
+  #### 1. You may be able to copy the mask from another lun, using the `mask` command on the SRX:
+      SRX shelf X> mask
 
 | These MACs are what I had in old documentation from the NCMC installation:
 |---------------------------------------------------------------------------------------------------
@@ -38,6 +38,10 @@ You may be able to copy the mask from another lun, using the `mask` command on t
 ----
 ### 5 ON ZX: Tell ZFS you have replaced the disk (with "itself")
     zpool replace ${zpool} ${CTD} ${CTD}
+
+ * The CTD of the disk is the Solaris will look like `c4t100d1`
+
+
 ----
 ### 6 ON ZX: Verify status
     zpool status ${zpool}
