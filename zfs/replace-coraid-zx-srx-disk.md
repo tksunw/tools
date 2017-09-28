@@ -1,20 +1,21 @@
 
 # REPLACE A DISK IN A CORAID ZX/SRX POOL:
-----
-### 1. ON SRX: Offline & remove the disk
+
+## 1. ON SRX: Offline & remove the disk
     SRX shelf X> offline ${disk}
     SRX shelf X> remove ${disk}
-
-### 2. ON SRX: Locate the disk in the shelf
+----
+## 2. ON SRX: Locate the disk in the shelf
   #### 1. On CorOS previous to 6.2.1, locate the failed disk with:
     SRX shelf X> slotled ${disk} locate
 
   #### 2. On CorOS 6.2.1 and above, locate the failed disk with:
     SRX shelf X> setslotled locate ${disk}
 ----
-### 3. Physically replace disk
+## 3. Physically replace disk
+  * find the illuminated LEDs in the SRX chassis' and replace the drives with the new drives.  
 ----
-### 4. ON SRX: Find the correct MASK for use when recreating the JBOD:
+## 4. ON SRX: Find the correct MASK for use when recreating the JBOD:
 
   #### 1. You may be able to copy the mask from another lun, using the `mask` command on the SRX:
       SRX shelf X> mask
@@ -28,21 +29,20 @@
  
 
 ----
-### 4. ON SRX: Make the new JBOD AoE lun, apply the masks, and online it (USE THE SAME SHELF.SLOT AS BEFORE):
+## 5. ON SRX: Make the new JBOD AoE lun, apply the masks, and online it (USE THE SAME SHELF.SLOT AS BEFORE):
     SRX shelf X> make ${disk} jbod ${shelf}.${slot}
     SRX shelf X> mask ${disk} ${mask-formatted-hba-macs-from-above}
     SRX shelf X> online ${disk}
 ----
-### 5 ON ZX: Tell the ZX to rescan the AoE Drives and remove any stale device entries for the old drives
+## 6. ON ZX: Tell the ZX to rescan the AoE Drives and remove any stale device entries for the old drives
     echo flush > /proc/ethdrv/ctl
 ----
-### 5 ON ZX: Tell ZFS you have replaced the disk (with "itself")
+## 7. ON ZX: Tell ZFS you have replaced the disk (with "itself")
     zpool replace ${zpool} ${CTD} ${CTD}
 
- * The CTD of the disk is the Solaris will look like `c4t100d1`
-
+ * *The CTD of the disk is the Solaris will look like* `c4t100d1`
 
 ----
-### 6 ON ZX: Verify status
+## 8. ON ZX: Verify status
     zpool status ${zpool}
 ----
