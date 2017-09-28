@@ -1,6 +1,6 @@
 
-REPLACE A DISK IN A CORAID ZX/SRX POOL:
-----------------------------------------------------------------------------------------------------
+# REPLACE A DISK IN A CORAID ZX/SRX POOL:
+----
 1 ON SRX: Offline & remove the disk
  SRX shelf X> offline ${disk}
  SRX shelf X> remove ${disk}
@@ -11,9 +11,9 @@ REPLACE A DISK IN A CORAID ZX/SRX POOL:
 
  2b: On CorOS 6.2.1 and above, locate the failed disk with:
  SRX shelf X> setslotled locate ${disk}
-----------------------------------------------------------------------------------------------------
+----
 3 Physically replace disk
-----------------------------------------------------------------------------------------------------
+----
 4 ON SRX: Find the correct MASK for use when recreating the JBOD:
 
 You may be able to copy the mask from another lun, using the `mask` command on the SRX:
@@ -28,12 +28,12 @@ You may be able to copy the mask from another lun, using the `mask` command on t
 | +001004012e7f +001004012db7 +001004012e7e +001004012db6
  ---------------------------------------------------------------------------------------------------
 
-----------------------------------------------------------------------------------------------------
+----
 4 ON SRX: Make the new JBOD AoE lun, apply the masks, and online it (USE THE SAME SHELF.SLOT AS BEFORE):
  SRX shelf X> make ${disk} jbod ${shelf}.${slot}
  SRX shelf X> mask ${disk} ${mask-formatted-hba-macs-from-above}
  SRX shelf X> online ${disk}
-----------------------------------------------------------------------------------------------------
+----
 5 ON ZX: Tell the ZX to rescan the AoE Drives and remove any stale device entries for the old drives
 echo flush > /proc/ethdrv/ctl
 
@@ -42,4 +42,4 @@ echo flush > /proc/ethdrv/ctl
 
 6 ON ZX: Verify status
  zpool status ${zpool}
-----------------------------------------------------------------------------------------------------
+----
