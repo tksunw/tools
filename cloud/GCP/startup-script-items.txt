@@ -1,0 +1,4 @@
+
+# install the stackdriver monitoring agent for deeper insight
+curl -O https://repo.stackdriver.com/stack-install.sh
+sudo bash stack-install.sh --write-gcm
