@@ -6,3 +6,6 @@
 
 ### zfs:
 * zfs related scripts
+
+### mac:
+* Mac OS X related scripts.
