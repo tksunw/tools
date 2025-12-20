@@ -32,6 +32,12 @@ Param(
     [String]$WordListFile = "${env:LOCALAPPDATA}\EFF\eff_large_wordlist.txt"
 )
 
+if ($isMacOS) {
+    $WordListFile = "${env:TMPDIR}/EFF/eff_large_wordlist.txt"
+    $WordListPath = "${env:TMPDIR}/EFF"
+} else {
+    $WordListPath = "${env:LOCALAPPDATA}\EFF"
+}
 
 # Using the EFF Large Wordlist from:
 #    https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt
@@ -42,8 +48,8 @@ $effWordlist = 'https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt'
 # If we don't find the worklist in %LOCALAPPDATA%, then let's download it 
 if (-not (Test-Path $WordListFile -ErrorAction SilentlyContinue)) {
     write-host -ForegroundColor Cyan 'WordlistFile not found, downloading EFF file'
-    if (-not (Test-Path $env:LOCALAPPDATA\EFF)) {
-        $null = New-Item -ItemType Directory -Path $env:LOCALAPPDATA\EFF -Force
+    if (-not (Test-Path $WordListPath)) {
+        $null = New-Item -ItemType Directory -Path $WordListPath -Force
     }
     $null = iwr $effWordlist -OutFile $WordListFile
 }
