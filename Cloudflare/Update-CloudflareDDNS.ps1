@@ -1,4 +1,61 @@
 #!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+    Updates a Cloudflare DNS A record with the current public IP address for dynamic DNS.
+
+.DESCRIPTION
+    This script retrieves the current public IP address and updates a specified Cloudflare DNS A record.
+    It includes idempotency checks to avoid unnecessary API calls when the IP hasn't changed, proper error
+    handling, and security best practices for handling API credentials.
+
+.PARAMETER ZoneID
+    The Cloudflare Zone ID containing the DNS record to update.
+    Can be provided via parameter or CLOUDFLARE_ZONE_ID environment variable.
+
+.PARAMETER RecordID
+    The Cloudflare DNS Record ID to update.
+    Can be provided via parameter or CLOUDFLARE_RECORD_ID environment variable.
+
+.PARAMETER RecordName
+    The DNS record name (e.g., "example.com" or "subdomain.example.com").
+    Can be provided via parameter or CLOUDFLARE_RECORD_NAME environment variable.
+
+.PARAMETER CloudflareApiKey
+    The Cloudflare API token with permissions to update DNS records.
+    Can be provided via parameter or CLOUDFLARE_API_KEY environment variable.
+    For security, it's recommended to use environment variables rather than passing directly.
+
+.EXAMPLE
+    ./Update-CloudflareDDNS.ps1
+    Updates the DNS record using environment variables for all parameters.
+
+.EXAMPLE
+    ./Update-CloudflareDDNS.ps1 -ZoneID "abc123" -RecordID "def456" -RecordName "home.example.com" -CloudflareApiKey "your-api-token"
+    Updates the DNS record using explicit parameters.
+
+.EXAMPLE
+    ./Update-CloudflareDDNS.ps1 -Verbose
+    Updates the DNS record with verbose output showing each step of the process.
+
+.NOTES
+    Author: Tim
+    Requires: PowerShell 7+
+
+    Required Environment Variables (if not using parameters):
+    - CLOUDFLARE_ZONE_ID
+    - CLOUDFLARE_RECORD_ID
+    - CLOUDFLARE_RECORD_NAME
+    - CLOUDFLARE_API_KEY
+
+    To find your Zone ID and Record ID:
+    1. Log into Cloudflare dashboard
+    2. Select your domain
+    3. Zone ID is shown on the overview page
+    4. Record ID can be found via the Cloudflare API or browser dev tools
+
+.LINK
+    https://api.cloudflare.com/#dns-records-for-a-zone-update-dns-record
+#>
 [CmdletBinding()]
 Param(
     [Parameter(Mandatory=$False)]
