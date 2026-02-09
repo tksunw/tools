@@ -35,7 +35,11 @@ Optional path to a custom EFF wordlist file. If not specified, uses platform-spe
 - Linux: ~/.local/share/EFF/eff_large_wordlist.txt
 
 If the file doesn't exist, it will be downloaded automatically from the official EFF source and
-verified against a known SHA-256 hash.
+validated for expected diceware structure.
+
+.PARAMETER AllowWordlistChange
+When using the default managed wordlist path, this switch allows updating the locally trusted
+SHA-256 hash if the downloaded wordlist content changes in the future.
 
 .INPUTS
 None. You cannot pipe objects to this script.
@@ -87,7 +91,8 @@ License: MIT License (https://opensource.org/license/mit/)
 
 Security Considerations:
 - Uses System.Security.Cryptography.RandomNumberGenerator for cryptographic randomness
-- Verifies downloaded wordlist integrity via SHA-256 hash
+- Validates downloaded wordlist structure (7,776 unique 1-6 keys with non-empty words)
+- Uses local trust-on-first-use (TOFU) hash tracking for unexpected wordlist changes
 - Suitable for generating passwords, passphrases, and other security credentials
 
 Platform Support: Windows (PowerShell 5.1+), macOS, and Linux (PowerShell 7+)
@@ -109,55 +114,134 @@ Param(
     [Int]$NumberofWords = 2,
 
     [Parameter(Mandatory=$false)]
-    [String]$WordListFile
+    [String]$WordListFile,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$AllowWordlistChange
 )
 
 # Platform-specific path handling
+$usingDefaultWordList = -not $PSBoundParameters.ContainsKey('WordListFile')
 if (-not $WordListFile) {
     if ($isMacOS) {
         $WordListFile = "${env:TMPDIR}/EFF/eff_large_wordlist.txt"
-        $WordListPath = "${env:TMPDIR}/EFF"
     } elseif ($IsLinux) {
         $WordListFile = "${env:HOME}/.local/share/EFF/eff_large_wordlist.txt"
-        $WordListPath = "${env:HOME}/.local/share/EFF"
     } else {
         $WordListFile = "${env:LOCALAPPDATA}\EFF\eff_large_wordlist.txt"
-        $WordListPath = "${env:LOCALAPPDATA}\EFF"
     }
 }
+$WordListPath = Split-Path -Path $WordListFile -Parent
+if ([string]::IsNullOrWhiteSpace($WordListPath)) {
+    $WordListPath = '.'
+}
+$TrustedHashFile = Join-Path -Path $WordListPath -ChildPath 'eff_large_wordlist.sha256'
+$expectedEntryCount = 7776
 
 # Using the EFF Large Wordlist from:
 #    https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt
 # for more info, see:
 #    https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases
 $effWordlist = 'https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt'
-# Known SHA-256 hash of the official EFF wordlist (verified 2016-07-18)
-$expectedHash = 'b9cf6752e7d15c56c5f4c88f4383c6e2d1f016c2f54e2024a1f1cfa792b4a13f'
+function Get-WordListHash {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return (Get-FileHash -Path $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+}
+
+function Assert-TrustedWordListHash {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$TrustedHashPath,
+        [Parameter(Mandatory = $true)][switch]$AllowChange
+    )
+
+    $currentHash = Get-WordListHash -Path $Path
+
+    if (-not (Test-Path -Path $TrustedHashPath -PathType Leaf -ErrorAction SilentlyContinue)) {
+        Set-Content -Path $TrustedHashPath -Value $currentHash -Encoding Ascii -NoNewline -ErrorAction Stop
+        Write-Verbose "Initialized trusted hash at: $TrustedHashPath"
+        return
+    }
+
+    $trustedHash = ((Get-Content -Path $TrustedHashPath -ErrorAction Stop | Select-Object -First 1).Trim()).ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($trustedHash)) {
+        throw "Trusted hash file '$TrustedHashPath' is empty or invalid."
+    }
+
+    if ($trustedHash -ne $currentHash) {
+        $message = "Wordlist hash changed. Trusted: $trustedHash Current: $currentHash"
+        if ($AllowChange) {
+            Write-Warning "$message. Updating trusted hash because -AllowWordlistChange was specified."
+            Set-Content -Path $TrustedHashPath -Value $currentHash -Encoding Ascii -NoNewline -ErrorAction Stop
+        } else {
+            throw "$message. Re-run with -AllowWordlistChange to trust the new wordlist hash."
+        }
+    }
+}
+
+function Get-ValidatedWordList {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][int]$ExpectedCount
+    )
+
+    $wordlist = @{}
+    $lineNumber = 0
+
+    foreach ($line in (Get-Content -Path $Path -ErrorAction Stop)) {
+        $lineNumber++
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            throw "Invalid wordlist: blank line at line $lineNumber."
+        }
+
+        $parts = $line -split "`t", 2
+        if ($parts.Count -ne 2) {
+            throw "Invalid wordlist: expected tab-delimited key/value at line $lineNumber."
+        }
+
+        $key = $parts[0].Trim()
+        $word = $parts[1].Trim()
+
+        if ($key -notmatch '^[1-6]{5}$') {
+            throw "Invalid wordlist: key '$key' at line $lineNumber is not a 5-digit dice code using digits 1-6."
+        }
+
+        if ([string]::IsNullOrWhiteSpace($word)) {
+            throw "Invalid wordlist: empty word at line $lineNumber."
+        }
+
+        if ($wordlist.ContainsKey($key)) {
+            throw "Invalid wordlist: duplicate key '$key' at line $lineNumber."
+        }
+
+        $wordlist[$key] = $word
+    }
+
+    if ($wordlist.Count -ne $ExpectedCount) {
+        throw "Invalid wordlist: expected $ExpectedCount entries, found $($wordlist.Count)."
+    }
+
+    return $wordlist
+}
 
 # Download wordlist if not present
 if (-not (Test-Path $WordListFile -ErrorAction SilentlyContinue)) {
     try {
-        Write-Host -ForegroundColor Cyan 'Wordlist file not found, downloading EFF file...'
+        Write-Verbose 'Wordlist file not found, downloading EFF file...'
 
-        if (-not (Test-Path $WordListPath)) {
+        if (-not (Test-Path -Path $WordListPath -PathType Container -ErrorAction SilentlyContinue)) {
             $null = New-Item -ItemType Directory -Path $WordListPath -Force -ErrorAction Stop
         }
 
         # Download with progress
-        $ProgressPreference = 'SilentlyContinue'  # Faster download
-        Invoke-WebRequest -Uri $effWordlist -OutFile $WordListFile -UseBasicParsing -ErrorAction Stop
-        $ProgressPreference = 'Continue'
-
-        # Verify file integrity
-        Write-Host -ForegroundColor Cyan 'Verifying download integrity...'
-        $actualHash = (Get-FileHash -Path $WordListFile -Algorithm SHA256).Hash.ToLower()
-
-        if ($actualHash -ne $expectedHash) {
-            Remove-Item -Path $WordListFile -Force -ErrorAction SilentlyContinue
-            throw "Downloaded wordlist hash mismatch. Expected: $expectedHash, Got: $actualHash. File removed for security."
+        $originalProgressPreference = $ProgressPreference
+        try {
+            $ProgressPreference = 'SilentlyContinue'  # Faster download
+            Invoke-WebRequest -Uri $effWordlist -OutFile $WordListFile -UseBasicParsing -ErrorAction Stop
         }
-
-        Write-Host -ForegroundColor Green 'Download verified successfully.'
+        finally {
+            $ProgressPreference = $originalProgressPreference
+        }
     }
     catch {
         Write-Error "Failed to download or verify wordlist: $_"
@@ -173,10 +257,12 @@ if (-not (Test-Path $WordListFile)) {
 
 # Load wordlist efficiently
 try {
-    $wordlist = (Get-Content $WordListFile -ErrorAction Stop).Replace("`t", "=") | ConvertFrom-StringData
+    # Validate structure first to ensure a tampered/corrupt file is rejected.
+    $wordlist = Get-ValidatedWordList -Path $WordListFile -ExpectedCount $expectedEntryCount
 
-    if ($wordlist.Count -eq 0) {
-        throw "Wordlist is empty or invalid"
+    # Trust On First Use (TOFU): persist a local trusted hash and detect unexpected changes later.
+    if ($usingDefaultWordList) {
+        Assert-TrustedWordListHash -Path $WordListFile -TrustedHashPath $TrustedHashFile -AllowChange:$AllowWordlistChange
     }
 }
 catch {
@@ -184,45 +270,30 @@ catch {
     exit 1
 }
 
-# Initialize cryptographically secure RNG
-$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-
 # Function to generate a cryptographically secure random number in range
 function Get-SecureRandomNumber {
     param([int]$Min, [int]$Max)
-
-    $range = $Max - $Min
-    $bytes = New-Object byte[] 4
-    $rng.GetBytes($bytes)
-    $randomInt = [System.BitConverter]::ToUInt32($bytes, 0)
-
-    return ($randomInt % $range) + $Min
+    return [System.Security.Cryptography.RandomNumberGenerator]::GetInt32($Min, $Max)
 }
 
 # Generate $NumberofWords unique 5-digit 6-sided dice rolls using HashSet for efficiency
 $rolls = [System.Collections.Generic.HashSet[string]]::new()
 
-try {
-    while ($rolls.Count -lt $NumberofWords) {
-        # Generate 5 dice rolls (each 1-6) using cryptographically secure random
-        $roll = -join (1..5 | ForEach-Object { Get-SecureRandomNumber -Min 1 -Max 7 })
+while ($rolls.Count -lt $NumberofWords) {
+    # Generate 5 dice rolls (each 1-6) using cryptographically secure random
+    $roll = -join (1..5 | ForEach-Object { Get-SecureRandomNumber -Min 1 -Max 7 })
 
-        # HashSet.Add() returns $false if duplicate, $true if added - automatic deduplication
-        $null = $rolls.Add($roll)
-    }
-}
-finally {
-    # Clean up RNG
-    $rng.Dispose()
+    # HashSet.Add() returns $false if duplicate, $true if added - automatic deduplication
+    $null = $rolls.Add($roll)
 }
 
 # Retrieve words corresponding to dice rolls
 # Capitalize words for readability when concatenated
+$textInfo = (Get-Culture).TextInfo
 $dicewords = ($rolls | ForEach-Object {
     $word = $wordlist.$_
     if ($word) {
-        # Use current culture instead of hardcoded en-US
-        (Get-Culture).TextInfo.ToTitleCase($word)
+        $textInfo.ToTitleCase($word)
     }
     else {
         Write-Warning "Roll $_ not found in wordlist"
@@ -240,11 +311,14 @@ Write-Output "`nYour passphrase is:"
 Write-Output $passphrase
 
 # Calculate entropy and possible combinations
-Write-Output "`n# of possible passwords with $NumberofWords rolls:"
-$poss = [BigInt]::Pow(7776, $NumberofWords)
+Write-Output "`n# of possible passwords with $NumberofWords unique rolls:"
+$poss = [bigint]1
+for ($i = 0; $i -lt $NumberofWords; $i++) {
+    $poss *= (7776 - $i)
+}
 
 # Calculate bits of entropy
-$entropyBits = [Math]::Log($poss, 2)
+$entropyBits = [Math]::Log([double]$poss, 2)
 Write-Output "Entropy: $([Math]::Round($entropyBits, 2)) bits"
 
 # Format large numbers more efficiently
@@ -264,7 +338,7 @@ $formatted = $false
 foreach ($mag in $magnitude) {
     $threshold = [bigint]::Pow(10, $mag.Power)
     if ($poss -gt $threshold) {
-        $value = [Math]::Round($poss / $threshold, 2)
+        $value = [Math]::Round(([double]$poss / [double]$threshold), 2)
         Write-Output "~ $value $($mag.Name)"
         $formatted = $true
         break
