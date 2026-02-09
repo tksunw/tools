@@ -28,6 +28,10 @@ More words increase security exponentially:
 - 6 words: ~77.5 bits of entropy (recommended for high security)
 - 7 words: ~90.5 bits of entropy
 
+.PARAMETER AddSpecialsAndNumbers
+When specified, generates a complex password variant by replacing each space between words with a
+random special character and appending two random digits. Uses cryptographically secure randomness.
+
 .PARAMETER WordListFile
 Optional path to a custom EFF wordlist file. If not specified, uses platform-specific default locations:
 - Windows: %LOCALAPPDATA%\EFF\eff_large_wordlist.txt
@@ -45,9 +49,9 @@ SHA-256 hash if the downloaded wordlist content changes in the future.
 None. You cannot pipe objects to this script.
 
 .OUTPUTS
-System.String
-Outputs the generated words (title-cased and space-separated), the concatenated passphrase,
-entropy information in bits, and the total number of possible combinations.
+PSCustomObject
+Returns an object with properties: Words, PassPhrase, ComplexPassword, EntropyBits, Combinations.
+Also displays the generated words, passphrase, entropy, and (if -AddSpecialsAndNumbers) the complex password.
 
 .EXAMPLE
 PS> .\Get-DiceWords.ps1
@@ -78,6 +82,20 @@ Entropy: 77.55 bits
 ~ 221.07 quintillion
 
 Generates a secure 6-word passphrase with ~77.5 bits of entropy.
+
+.EXAMPLE
+PS> .\Get-DiceWords.ps1 -NumberofWords 4 -AddSpecialsAndNumbers
+
+Your words are:
+Matador Wayside Reboot Unsteady
+
+Your passphrase is:
+MatadorWaysideRebootUnsteady
+
+Your complex password is:
+Matador^Wayside$Reboot_Unsteady37
+
+Generates a 4-word passphrase plus a complex variant with special characters and digits.
 
 .EXAMPLE
 PS> .\Get-DiceWords.ps1 -NumberofWords 4 -WordListFile "C:\Custom\wordlist.txt"
@@ -112,6 +130,9 @@ Param(
     [Parameter(Mandatory=$false)]
     [ValidateRange(1, 20)]
     [Int]$NumberofWords = 2,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$AddSpecialsAndNumbers,
 
     [Parameter(Mandatory=$false)]
     [String]$WordListFile,
@@ -303,23 +324,46 @@ $dicewords = ($rolls | ForEach-Object {
 
 $passphrase = $dicewords.Replace(' ', '')
 
-# Output results
-Write-Output "Your words are:"
-Write-Output $dicewords
+# Generate complex password if requested
+$specialChars = @('~','!','@','#','$','%','^','&','*','_','-','+','=','`','|','\','(',')','{','}','[',']',':',';','"',"'",'<','>',',','.','?','/')
+$numbers      = @('0','1','2','3','4','5','6','7','8','9')
+$complexPassword = $null
 
-Write-Output "`nYour passphrase is:"
-Write-Output $passphrase
+if ($AddSpecialsAndNumbers) {
+    $complexPassword = $dicewords
+    [regex]$pattern = ' '
+    while ($complexPassword -match ' ') {
+        $specialChar = $specialChars[(Get-SecureRandomNumber -Min 0 -Max $specialChars.Count)]
+        $complexPassword = $pattern.Replace($complexPassword, $specialChar, 1)
+    }
+    $digit1 = $numbers[(Get-SecureRandomNumber -Min 0 -Max $numbers.Count)]
+    $digit2 = $numbers[(Get-SecureRandomNumber -Min 0 -Max $numbers.Count)]
+    $complexPassword = $complexPassword + $digit1 + $digit2
+}
+
+# Display results
+Write-Host "Your words are:"
+Write-Host $dicewords
+
+Write-Host "`nYour passphrase is:"
+Write-Host $passphrase
+
+if ($complexPassword) {
+    Write-Host "`nYour complex password is:"
+    Write-Host $complexPassword
+}
 
 # Calculate entropy and possible combinations
-Write-Output "`n# of possible passwords with $NumberofWords unique rolls:"
 $poss = [bigint]1
 for ($i = 0; $i -lt $NumberofWords; $i++) {
     $poss *= (7776 - $i)
 }
 
 # Calculate bits of entropy
-$entropyBits = [Math]::Log([double]$poss, 2)
-Write-Output "Entropy: $([Math]::Round($entropyBits, 2)) bits"
+$entropyBits = [Math]::Round([Math]::Log([double]$poss, 2), 2)
+
+Write-Host "`n# of possible passwords with $NumberofWords unique rolls:"
+Write-Host "Entropy: $entropyBits bits"
 
 # Format large numbers more efficiently
 $magnitude = @(
@@ -334,17 +378,25 @@ $magnitude = @(
     @{Name = 'thousand';    Power = 3}
 )
 
-$formatted = $false
+$combinationsText = $null
 foreach ($mag in $magnitude) {
     $threshold = [bigint]::Pow(10, $mag.Power)
     if ($poss -gt $threshold) {
         $value = [Math]::Round(([double]$poss / [double]$threshold), 2)
-        Write-Output "~ $value $($mag.Name)"
-        $formatted = $true
+        $combinationsText = "~ $value $($mag.Name)"
         break
     }
 }
+if (-not $combinationsText) {
+    $combinationsText = "~ $poss"
+}
+Write-Host $combinationsText
 
-if (-not $formatted) {
-    Write-Output "~ $poss"
+# Return structured object for pipeline/script use
+[PSCustomObject]@{
+    Words           = $dicewords
+    PassPhrase      = $passphrase
+    ComplexPassword  = $complexPassword
+    EntropyBits     = $entropyBits
+    Combinations    = $combinationsText
 }
