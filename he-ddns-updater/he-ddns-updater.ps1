@@ -1,37 +1,85 @@
-﻿# he-ddns-updater.ps1
+#!/usr/bin/env pwsh
+<#
+.SYNOPSIS
+    Updates Hurricane Electric DDNS record with the current public IPv4 address.
 
-$ipsite   = "https://4.ifcfg.me/ip"
-$hostname = '<Dyn DNS Hostname to Update>'
-$authkey  = '<Dyn DNS Auth Key>'
-$ddnsurl  = 'https://dyn.dns.he.net/nic/update'
-$ProgressPreference = "SilentlyContinue"
-$ErrorActionPreference = "SilentlyContinue"
+.DESCRIPTION
+    Reads configuration from parameters or environment variables, discovers current public IPv4,
+    and updates HE dynamic DNS endpoint only when needed by the provider.
 
-function Write-hr1 {
-    Write-Host ("-" * 80)
+.PARAMETER HostName
+    Dynamic DNS hostname to update. Defaults to HE_DDNS_HOSTNAME env var.
+
+.PARAMETER AuthKey
+    Dynamic DNS key/password. Defaults to HE_DDNS_KEY env var.
+
+.PARAMETER IpLookupSite
+    Public IPv4 lookup endpoint. Default: https://4.ifcfg.me/ip
+
+.PARAMETER DdnsUrl
+    Hurricane Electric update endpoint. Default: https://dyn.dns.he.net/nic/update
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$HostName = $Env:HE_DDNS_HOSTNAME,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$AuthKey = $Env:HE_DDNS_KEY,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$IpLookupSite = 'https://4.ifcfg.me/ip',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$DdnsUrl = 'https://dyn.dns.he.net/nic/update'
+)
+
+$ErrorActionPreference = 'Stop'
+
+if (-not $HostName -or -not $AuthKey) {
+    throw 'Missing required parameters. Set HE_DDNS_HOSTNAME and HE_DDNS_KEY or pass -HostName/-AuthKey.'
 }
 
-function Write-hr2 {
-    Write-Host ("=" * 80)
+function Get-WanIPv4 {
+    param([Parameter(Mandatory = $true)][string]$Uri)
+
+    Write-Verbose "Retrieving public IPv4 from $Uri"
+    $raw = (Invoke-WebRequest -Uri $Uri -TimeoutSec 10 -ErrorAction Stop).Content.Trim()
+    try {
+        $ip = [ipaddress]$raw
+    } catch {
+        throw "IP lookup response is not a valid IP address: [$raw]"
+    }
+
+    if ($ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+        throw "Expected IPv4 address but received [$raw]"
+    }
+
+    return $ip.IPAddressToString
 }
 
-function Get-WanIP {
-    (Invoke-WebRequest -URI $ipsite).Content -replace "`n|`r"
+$ip = Get-WanIPv4 -Uri $IpLookupSite
+Write-Information "Updating HE DDNS host '$HostName' to IPv4 $ip" -InformationAction Continue
+
+$postParams = @{
+    password = $AuthKey
+    hostname = $HostName
+    myip = $ip
 }
 
-Write-hr2
-$ip = Get-WanIP
+try {
+    $response = Invoke-WebRequest -Uri $DdnsUrl -Method POST -Body $postParams -TimeoutSec 10 -ErrorAction Stop
+} catch {
+    throw "Failed to update HE DDNS endpoint: $($_.Exception.Message)"
+}
 
-Write-Output "Setting DNS entry for $hostname to point to $ip"
-Write-hr1
-$postParams = @{password=$authkey; hostname=$hostname; myip=$ip}
-$res = Invoke-WebRequest -URI $ddnsurl -Method POST -Body $postParams -DisableKeepAlive -ov ov -ev ev 
-
-if ($res.StatusDescription -eq 'OK') {
-    Write-Host "Success: Dynamic DNS for $hostname updated to $ip" -foreground "green"
+$body = if ($response.Content) { $response.Content.Trim().ToLowerInvariant() } else { '' }
+if ($response.StatusCode -eq 200 -and ($body.StartsWith('good') -or $body.StartsWith('nochg'))) {
+    Write-Information "Success: Dynamic DNS for $HostName is $ip ($body)" -InformationAction Continue
 } else {
-    Write-Host "Failure updating Dynamic DNS for $hostname"
-    Write-hr1
-    Write-Host $ev -foreground "red"
+    throw "HE DDNS update failed for $HostName. HTTP $($response.StatusCode). Response: $($response.Content)"
 }
-Write-hr2
