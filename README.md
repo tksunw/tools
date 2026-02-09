@@ -1,6 +1,6 @@
 # tools
 
-### Get-DiceWords.ps1
+### DiceWords-Password-Generator
 * a powershell script to generate random passwords from the EFF Large Wordlist, by simulating rolls of 5 6-sided dice
 * validates downloaded wordlist structure (7,776 unique dice keys in `11111`-`66666` format, non-empty words)
 * uses local trust-on-first-use (TOFU) hash tracking for the default managed wordlist
@@ -17,8 +17,8 @@
 
 | Purpose | Command |
 | --- | --- |
-| Generate a 6-word passphrase | `pwsh ./Get-DiceWords.ps1 -NumberofWords 6` |
-| Accept and persist a changed managed wordlist hash | `pwsh ./Get-DiceWords.ps1 -AllowWordlistChange` |
+| Generate a 6-word passphrase | `pwsh ./DiceWords-Password-Generator/Get-DiceWords.ps1 -NumberofWords 6` |
+| Accept and persist a changed managed wordlist hash | `pwsh ./DiceWords-Password-Generator/Get-DiceWords.ps1 -AllowWordlistChange` |
 
 ### he-ddns-updater:
 * a small script to update dyndns entries at Hurricane Electric
